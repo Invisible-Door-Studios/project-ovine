@@ -7,6 +7,74 @@ export const GlobalState = {
   telemetry: null // For HUD
 };
 
+function resolveEntityCollisions(world, id, transform, allTransforms) {
+  // Entity vs Entity Collision
+  for (const other of allTransforms) {
+    if (id === other) continue;
+    const tOther = world.getComponent(other, Transform);
+    // Skip static objects like FENCE that don't have Velocity if we handle them specially
+    const vOther = world.getComponent(other, Velocity);
+    if (!vOther) continue; // Only collide dynamic entities with dynamic entities
+    
+    const ex = transform.x - tOther.x;
+    const ez = transform.z - tOther.z;
+    const edist = Math.hypot(ex, ez);
+    if (edist > 0 && edist < 2.0) {
+      const push = (2.0 - edist) / 2;
+      transform.x += (ex / edist) * push;
+      transform.z += (ez / edist) * push;
+      tOther.x -= (ex / edist) * push;
+      tOther.z -= (ez / edist) * push;
+    }
+  }
+}
+
+function resolveYardFence(transform, vel) {
+  // Fence Collision (Yard at 80, 80, radius 30)
+  const dx = transform.x - 80;
+  const dz = transform.z - 80;
+  const distToYard = Math.hypot(dx, dz);
+  if (distToYard > 28 && distToYard < 32) {
+    const angle = Math.atan2(dz, dx);
+    // Gap is roughly between -1.0 and -0.1 rad
+    if (angle < -1.0 || angle > -0.1) {
+      if (distToYard < 30) {
+        transform.x = 80 + (dx / distToYard) * 28;
+        transform.z = 80 + (dz / distToYard) * 28;
+      } else {
+        transform.x = 80 + (dx / distToYard) * 32;
+        transform.z = 80 + (dz / distToYard) * 32;
+      }
+      vel.vx *= 0.8; vel.vz *= 0.8;
+    }
+  }
+}
+
+function moveAndSettle(transform, vel, speed, dt) {
+  transform.x += vel.vx * dt * 60;
+  transform.z += vel.vz * dt * 60;
+  
+  // Map Boundaries
+  transform.x = Math.max(-140, Math.min(140, transform.x));
+  transform.z = Math.max(-140, Math.min(140, transform.z));
+  
+  // Complex Terrain Logic (River + Hills)
+  const distFromRiver = Math.abs(transform.x);
+  const riverDip = Math.max(0, 20 - distFromRiver) * -0.5; // dip down in the middle
+  const hill = Math.sin(transform.x * 0.02) * Math.cos(transform.z * 0.02) * 15;
+  
+  const surfaceY = Math.max(riverDip + hill, -1.5); // Ensure surface doesn't go infinitely deep
+  transform.y = surfaceY + transform.hoverHeight;
+  
+  vel.vx *= vel.drag;
+  vel.vz *= vel.drag;
+  
+  if (speed > 0.05) {
+    const targetRot = Math.atan2(vel.vx, vel.vz);
+    transform.rotationY += (targetRot - transform.rotationY) * 0.2; 
+  }
+}
+
 export function PhysicsSystem(world, dt) {
   const movers = world.query([Transform, Velocity]);
   const allTransforms = world.query([Transform]);
@@ -15,44 +83,8 @@ export function PhysicsSystem(world, dt) {
     const transform = world.getComponent(id, Transform);
     const vel = world.getComponent(id, Velocity);
     
-    // Entity vs Entity Collision
-    for (const other of allTransforms) {
-      if (id === other) continue;
-      const tOther = world.getComponent(other, Transform);
-      // Skip static objects like FENCE that don't have Velocity if we handle them specially
-      const vOther = world.getComponent(other, Velocity);
-      if (!vOther) continue; // Only collide dynamic entities with dynamic entities
-      
-      const ex = transform.x - tOther.x;
-      const ez = transform.z - tOther.z;
-      const edist = Math.hypot(ex, ez);
-      if (edist > 0 && edist < 2.0) {
-        const push = (2.0 - edist) / 2;
-        transform.x += (ex / edist) * push;
-        transform.z += (ez / edist) * push;
-        tOther.x -= (ex / edist) * push;
-        tOther.z -= (ez / edist) * push;
-      }
-    }
-    
-    // Fence Collision (Yard at 80, 80, radius 30)
-    const dx = transform.x - 80;
-    const dz = transform.z - 80;
-    const distToYard = Math.hypot(dx, dz);
-    if (distToYard > 28 && distToYard < 32) {
-      const angle = Math.atan2(dz, dx);
-      // Gap is roughly between -1.0 and -0.1 rad
-      if (angle < -1.0 || angle > -0.1) {
-        if (distToYard < 30) {
-          transform.x = 80 + (dx / distToYard) * 28;
-          transform.z = 80 + (dz / distToYard) * 28;
-        } else {
-          transform.x = 80 + (dx / distToYard) * 32;
-          transform.z = 80 + (dz / distToYard) * 32;
-        }
-        vel.vx *= 0.8; vel.vz *= 0.8;
-      }
-    }
+    resolveEntityCollisions(world, id, transform, allTransforms);
+    resolveYardFence(transform, vel);
     
     const speed = Math.hypot(vel.vx, vel.vz);
     if (speed > vel.maxSpeed) {
@@ -60,28 +92,7 @@ export function PhysicsSystem(world, dt) {
       vel.vz = (vel.vz / speed) * vel.maxSpeed;
     }
     
-    transform.x += vel.vx * dt * 60;
-    transform.z += vel.vz * dt * 60;
-    
-    // Map Boundaries
-    transform.x = Math.max(-140, Math.min(140, transform.x));
-    transform.z = Math.max(-140, Math.min(140, transform.z));
-    
-    // Complex Terrain Logic (River + Hills)
-    const distFromRiver = Math.abs(transform.x);
-    const riverDip = Math.max(0, 20 - distFromRiver) * -0.5; // dip down in the middle
-    const hill = Math.sin(transform.x * 0.02) * Math.cos(transform.z * 0.02) * 15;
-    
-    const surfaceY = Math.max(riverDip + hill, -1.5); // Ensure surface doesn't go infinitely deep
-    transform.y = surfaceY + transform.hoverHeight;
-
-    vel.vx *= vel.drag;
-    vel.vz *= vel.drag;
-    
-    if (speed > 0.05) {
-      const targetRot = Math.atan2(vel.vx, vel.vz);
-      transform.rotationY += (targetRot - transform.rotationY) * 0.2; 
-    }
+    moveAndSettle(transform, vel, speed, dt);
   }
 }
 
@@ -103,7 +114,7 @@ export function CACSystem(world, dt) {
       const advAction = world.getComponent(id, ActionState);
       
       // Expand Adversary Action
-      if (advAction && advAction.isActive) {
+      if (advAction?.isActive) {
         advAction.radius += dt * 80;
         if (advAction.radius > advAction.maxRadius) {
           advAction.isActive = false;
