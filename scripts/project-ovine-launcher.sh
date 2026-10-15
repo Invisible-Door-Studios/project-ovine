@@ -30,7 +30,7 @@ mkdir -p "$(dirname "$PID_FILE")"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 start_server() {
-    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+    if [[ -f "$PID_FILE" ]] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         echo "Server already running at $URL (PID $(cat $PID_FILE))"
         return 0
     fi
@@ -51,7 +51,7 @@ start_server() {
 }
 
 stop_server() {
-    if [ -f "$PID_FILE" ]; then
+    if [[ -f "$PID_FILE" ]]; then
         PID=$(cat "$PID_FILE")
         if kill -0 $PID 2>/dev/null; then
             echo "Stopping server (PID $PID)..."
@@ -63,14 +63,16 @@ stop_server() {
     else
         echo "Server not running."
     fi
+    return "$?"
 }
 
 status_server() {
-    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+    if [[ -f "$PID_FILE" ]] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
         echo "RUNNING (PID $(cat $PID_FILE)) at $URL"
     else
         echo "STOPPED"
     fi
+    return 0
 }
 
 open_browser() {
@@ -82,6 +84,7 @@ open_browser() {
     else
         echo "Open manually: $URL"
     fi
+    return "$?"
 }
 
 integration() {
@@ -95,12 +98,14 @@ $Shortcut.Save()
 EOF
     powershell.exe -ExecutionPolicy Bypass -File "$(wslpath -w /tmp/create_shortcut.ps1)"
     echo "Integration complete."
+    return 0
 }
 
 disintegration() {
     echo "Removing desktop shortcut..."
     powershell.exe -Command "Remove-Item 'C:\Users\USER\Desktop\Project Ovine.lnk' -ErrorAction SilentlyContinue"
     echo "Disintegration complete."
+    return 0
 }
 
 MODE="$1"

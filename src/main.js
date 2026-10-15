@@ -188,6 +188,121 @@ function updateHUD() {
   `;
 }
 
+function addSheepLegs(mesh) {
+  const legGeo = new THREE.CylinderGeometry(0.2, 0.2, 1);
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  for(let j=0; j<4; j++) {
+    const leg = new THREE.Mesh(legGeo, legMat);
+    leg.position.set(j%2===0?0.6:-0.6, 0.5, j<2?0.6:-0.6);
+    leg.castShadow = true;
+    mesh.add(leg);
+  }
+}
+
+function createEntityMesh(mComp) {
+  const mesh = new THREE.Group();
+  if (mComp.type === 'SHEEP') {
+    const bodyGeo = new THREE.DodecahedronGeometry(1.2, 1);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1; body.castShadow = true;
+    mesh.add(body);
+    addSheepLegs(mesh);
+  } else if (mComp.type === 'CAT') {
+    const bodyGeo = new THREE.BoxGeometry(1, 1, 2);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xf97316 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.5; body.castShadow = true;
+    mesh.add(body);
+    const earGeo = new THREE.ConeGeometry(0.3, 0.6);
+    const earL = new THREE.Mesh(earGeo, bodyMat); earL.position.set(-0.3, 1.2, 0.8);
+    const earR = new THREE.Mesh(earGeo, bodyMat); earR.position.set(0.3, 1.2, 0.8);
+    mesh.add(earL, earR);
+  } else if (mComp.type === 'SHEEPDOG' || mComp.type === 'BORDER_COLLIE') {
+    const color = mComp.type === 'BORDER_COLLIE' ? 0x222222 : 0xf5f5f4;
+    const bodyGeo = new THREE.BoxGeometry(1.5, 1.5, 3);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: color });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.75; body.castShadow = true;
+    mesh.add(body);
+    const snoutGeo = new THREE.BoxGeometry(1, 1, 1);
+    const snout = new THREE.Mesh(snoutGeo, bodyMat);
+    snout.position.set(0, 1.5, 1.8);
+    mesh.add(snout);
+  } else if (mComp.type === 'HAMSTER') {
+    const bodyGeo = new THREE.SphereGeometry(1);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd97706 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1.0; body.castShadow = true;
+    mesh.add(body);
+  } else if (mComp.type === 'FENCE') {
+    const postGeo = new THREE.BoxGeometry(0.5, 3, 0.5);
+    const railGeo = new THREE.BoxGeometry(12, 0.5, 0.2);
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+    const post = new THREE.Mesh(postGeo, woodMat); post.position.y = 1.5;
+    const rail1 = new THREE.Mesh(railGeo, woodMat); rail1.position.set(6, 1.0, 0);
+    const rail2 = new THREE.Mesh(railGeo, woodMat); rail2.position.set(6, 2.0, 0);
+    mesh.add(post, rail1, rail2);
+  } else if (mComp.type === 'cylinder') {
+    const geo = new THREE.CylinderGeometry(1, 1, 0.3, 16);
+    const mat = new THREE.MeshLambertMaterial({ color: mComp.color });
+    const c = new THREE.Mesh(geo, mat); c.castShadow = true;
+    mesh.add(c);
+  } else {
+    const geo = new THREE.BoxGeometry();
+    const mat = new THREE.MeshLambertMaterial({ color: mComp.color });
+    const b = new THREE.Mesh(geo, mat); b.castShadow = true;
+    mesh.add(b);
+  }
+  mesh.scale.setScalar(mComp.scale);
+  return mesh;
+}
+
+function renderPlayerOverlay() {
+  if (playerEntityId === null) return;
+  const pTrans = world.getComponent(playerEntityId, Transform);
+  const pMesh = world.getComponent(playerEntityId, MeshComponent);
+  const pVel = world.getComponent(playerEntityId, Velocity);
+  const pAction = world.getComponent(playerEntityId, ActionState);
+  updateCamera(pTrans, pMesh.scale, pVel);
+  
+  // Render AoE
+  if (pAction.isActive) {
+    aoeMesh.visible = true;
+    aoeMesh.position.set(pTrans.x, pTrans.y + 0.1, pTrans.z);
+    const s = pAction.radius;
+    aoeMesh.scale.set(s, s, s);
+    aoeMesh.material.color.setHex(pAction.type === 'BARK' ? 0xff3333 : 0x33ff33);
+    aoeMesh.material.opacity = 1.0 - (pAction.radius / pAction.maxRadius);
+  } else {
+    aoeMesh.visible = false;
+  }
+}
+
+function renderAdversaryAoes() {
+  const advBrains = world.query([CACBrainComponent, ActionState, Transform]);
+  for (const id of advBrains) {
+    const b = world.getComponent(id, CACBrainComponent);
+    if (b.role !== 'ALIEN' && b.role !== 'BORDER_COLLIE') continue;
+    const a = world.getComponent(id, ActionState);
+    const t = world.getComponent(id, Transform);
+    if (!a.isActive) continue;
+    aoeMesh.visible = true;
+    const hover = t.hoverHeight || 0;
+    aoeMesh.position.set(t.x, t.y - hover + 0.1, t.z); // on the ground
+    const s = a.radius;
+    aoeMesh.scale.set(s, s, s);
+    
+    if (a.type === 'CHAOS_BEAM') {
+      aoeMesh.material.color.setHex(0xd946ef); // Magenta
+    } else if (a.type === 'BARK') {
+      aoeMesh.material.color.setHex(0xff3333); // Red
+    }
+    
+    aoeMesh.material.opacity = 1.0 - (a.radius / a.maxRadius);
+  }
+}
+
 function renderSystem() {
   const renderables = world.query([Transform, MeshComponent]);
   
@@ -197,69 +312,7 @@ function renderSystem() {
     
     let mesh = meshMap.get(id);
     if (!mesh) {
-      mesh = new THREE.Group();
-      if (mComp.type === 'SHEEP') {
-        const bodyGeo = new THREE.DodecahedronGeometry(1.2, 1);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 1; body.castShadow = true;
-        mesh.add(body);
-        const legGeo = new THREE.CylinderGeometry(0.2, 0.2, 1);
-        const legMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-        for(let j=0; j<4; j++) {
-           const leg = new THREE.Mesh(legGeo, legMat);
-           leg.position.set(j%2===0?0.6:-0.6, 0.5, j<2?0.6:-0.6);
-           leg.castShadow = true;
-           mesh.add(leg);
-        }
-      } else if (mComp.type === 'CAT') {
-        const bodyGeo = new THREE.BoxGeometry(1, 1, 2);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xf97316 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.5; body.castShadow = true;
-        mesh.add(body);
-        const earGeo = new THREE.ConeGeometry(0.3, 0.6);
-        const earL = new THREE.Mesh(earGeo, bodyMat); earL.position.set(-0.3, 1.2, 0.8);
-        const earR = new THREE.Mesh(earGeo, bodyMat); earR.position.set(0.3, 1.2, 0.8);
-        mesh.add(earL, earR);
-      } else if (mComp.type === 'SHEEPDOG' || mComp.type === 'BORDER_COLLIE') {
-        const color = mComp.type === 'BORDER_COLLIE' ? 0x222222 : 0xf5f5f4;
-        const bodyGeo = new THREE.BoxGeometry(1.5, 1.5, 3);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: color });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.75; body.castShadow = true;
-        mesh.add(body);
-        const snoutGeo = new THREE.BoxGeometry(1, 1, 1);
-        const snout = new THREE.Mesh(snoutGeo, bodyMat);
-        snout.position.set(0, 1.5, 1.8);
-        mesh.add(snout);
-      } else if (mComp.type === 'HAMSTER') {
-        const bodyGeo = new THREE.SphereGeometry(1);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd97706 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 1.0; body.castShadow = true;
-        mesh.add(body);
-      } else if (mComp.type === 'FENCE') {
-        const postGeo = new THREE.BoxGeometry(0.5, 3, 0.5);
-        const railGeo = new THREE.BoxGeometry(12, 0.5, 0.2);
-        const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
-        const post = new THREE.Mesh(postGeo, woodMat); post.position.y = 1.5;
-        const rail1 = new THREE.Mesh(railGeo, woodMat); rail1.position.set(6, 1.0, 0);
-        const rail2 = new THREE.Mesh(railGeo, woodMat); rail2.position.set(6, 2.0, 0);
-        mesh.add(post, rail1, rail2);
-      } else if (mComp.type === 'cylinder') {
-        const geo = new THREE.CylinderGeometry(1, 1, 0.3, 16);
-        const mat = new THREE.MeshLambertMaterial({ color: mComp.color });
-        const c = new THREE.Mesh(geo, mat); c.castShadow = true;
-        mesh.add(c);
-      } else {
-        const geo = new THREE.BoxGeometry();
-        const mat = new THREE.MeshLambertMaterial({ color: mComp.color });
-        const b = new THREE.Mesh(geo, mat); b.castShadow = true;
-        mesh.add(b);
-      }
-      
-      mesh.scale.setScalar(mComp.scale);
+      mesh = createEntityMesh(mComp);
       scene.add(mesh);
       meshMap.set(id, mesh);
     }
@@ -269,50 +322,8 @@ function renderSystem() {
     if (id === playerEntityId) mesh.visible = GlobalState.cameraMode !== '1ST';
   }
   
-  if (playerEntityId !== null) {
-    const pTrans = world.getComponent(playerEntityId, Transform);
-    const pMesh = world.getComponent(playerEntityId, MeshComponent);
-    const pVel = world.getComponent(playerEntityId, Velocity);
-    const pAction = world.getComponent(playerEntityId, ActionState);
-    updateCamera(pTrans, pMesh.scale, pVel);
-    
-    // Render AoE
-    if (pAction.isActive) {
-      aoeMesh.visible = true;
-      aoeMesh.position.set(pTrans.x, pTrans.y + 0.1, pTrans.z);
-      const s = pAction.radius;
-      aoeMesh.scale.set(s, s, s);
-      aoeMesh.material.color.setHex(pAction.type === 'BARK' ? 0xff3333 : 0x33ff33);
-      aoeMesh.material.opacity = 1.0 - (pAction.radius / pAction.maxRadius);
-    } else {
-      aoeMesh.visible = false;
-    }
-  }
-  
-  // Render Adversary AoE if any
-  const advBrains = world.query([CACBrainComponent, ActionState, Transform]);
-  for (const id of advBrains) {
-    const b = world.getComponent(id, CACBrainComponent);
-    if (b.role === 'ALIEN' || b.role === 'BORDER_COLLIE') {
-      const a = world.getComponent(id, ActionState);
-      const t = world.getComponent(id, Transform);
-      if (a.isActive) {
-        aoeMesh.visible = true;
-        const hover = t.hoverHeight || 0;
-        aoeMesh.position.set(t.x, t.y - hover + 0.1, t.z); // on the ground
-        const s = a.radius;
-        aoeMesh.scale.set(s, s, s);
-        
-        if (a.type === 'CHAOS_BEAM') {
-          aoeMesh.material.color.setHex(0xd946ef); // Magenta
-        } else if (a.type === 'BARK') {
-          aoeMesh.material.color.setHex(0xff3333); // Red
-        }
-        
-        aoeMesh.material.opacity = 1.0 - (a.radius / a.maxRadius);
-      }
-    }
-  }
+  renderPlayerOverlay();
+  renderAdversaryAoes();
   updateHUD();
 }
 
